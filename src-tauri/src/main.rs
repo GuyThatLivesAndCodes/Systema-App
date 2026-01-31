@@ -3,6 +3,55 @@
 
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+
+fn get_log_path() -> PathBuf {
+    let mut path = std::env::current_exe().unwrap_or_default();
+    path.pop();
+    path.push("systema_log.txt");
+    path
+}
+
+fn log_message(msg: &str) {
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(get_log_path())
+    {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let _ = writeln!(file, "[{}] {}", timestamp, msg);
+    }
+}
+
+#[cfg(windows)]
+fn show_error_dialog(title: &str, message: &str) {
+    use std::ptr::null_mut;
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, typ: u32) -> i32;
+    }
+
+    let text = to_wide(message);
+    let caption = to_wide(title);
+    unsafe {
+        MessageBoxW(null_mut(), text.as_ptr(), caption.as_ptr(), 0x10); // MB_ICONERROR
+    }
+}
+
+#[cfg(not(windows))]
+fn show_error_dialog(_title: &str, _message: &str) {}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CommandResult {
@@ -324,35 +373,64 @@ fn open_windows_security() -> CommandResult {
 }
 
 fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![
-            get_system_info,
-            get_virtual_memory_info,
-            set_virtual_memory,
-            get_services_list,
-            set_service_startup,
-            disable_unnecessary_services,
-            get_startup_apps,
-            disable_startup_app,
-            get_defender_status,
-            enable_controlled_folder_access,
-            get_power_plan,
-            set_high_performance_power,
-            disable_telemetry,
-            get_dns_settings,
-            set_cloudflare_dns,
-            get_optional_features,
-            disable_optional_feature,
-            optimize_visual_effects,
-            quick_optimize,
-            open_system_properties,
-            open_services,
-            open_task_manager,
-            open_optional_features,
-            open_windows_security
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    // Set up panic hook to log crashes
+    std::panic::set_hook(Box::new(|panic_info| {
+        let msg = format!("PANIC: {}", panic_info);
+        log_message(&msg);
+        show_error_dialog("Systema Crash", &msg);
+    }));
+
+    log_message("Systema starting...");
+
+    log_message("Initializing Tauri builder...");
+    let builder = tauri::Builder::default();
+
+    log_message("Adding opener plugin...");
+    let builder = builder.plugin(tauri_plugin_opener::init());
+
+    log_message("Adding shell plugin...");
+    let builder = builder.plugin(tauri_plugin_shell::init());
+
+    log_message("Registering command handlers...");
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_system_info,
+        get_virtual_memory_info,
+        set_virtual_memory,
+        get_services_list,
+        set_service_startup,
+        disable_unnecessary_services,
+        get_startup_apps,
+        disable_startup_app,
+        get_defender_status,
+        enable_controlled_folder_access,
+        get_power_plan,
+        set_high_performance_power,
+        disable_telemetry,
+        get_dns_settings,
+        set_cloudflare_dns,
+        get_optional_features,
+        disable_optional_feature,
+        optimize_visual_effects,
+        quick_optimize,
+        open_system_properties,
+        open_services,
+        open_task_manager,
+        open_optional_features,
+        open_windows_security
+    ]);
+
+    log_message("Generating Tauri context...");
+    let context = tauri::generate_context!();
+
+    log_message("Running Tauri application...");
+    match builder.run(context) {
+        Ok(_) => {
+            log_message("Application exited normally");
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to start Systema: {}", e);
+            log_message(&error_msg);
+            show_error_dialog("Systema Error", &error_msg);
+        }
+    }
 }
