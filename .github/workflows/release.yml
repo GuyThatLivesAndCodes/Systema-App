@@ -1,0 +1,61 @@
+name: Release Systema
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and Release Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Systema ${{ github.ref_name }}'
+          releaseBody: |
+            ## Systema Windows PC Optimizer
+
+            Download the installer below:
+            - `.msi` - Windows Installer (recommended for most users)
+            - `.exe` - NSIS Installer (alternative)
+
+            ### Features
+            - Virtual Memory (RAM Swap) configuration
+            - Windows Services management
+            - Startup Apps control
+            - Power settings optimization
+            - Privacy/Telemetry settings
+            - Cloudflare DNS configuration
+            - Optional Features management
+            - Visual Effects optimization
+            - Quick Optimize one-click button
+            - Guides for Process Lasso & Revo Uninstaller
+          releaseDraft: false
+          prerelease: false
